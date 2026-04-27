@@ -1,4 +1,4 @@
-import Book from "../models/bookModel.mjs";
+import Book from "../models/BookModel.mjs";
 import pool from "../config/database.mjs";
 import axios from "axios";
 
