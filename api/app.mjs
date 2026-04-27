@@ -25,7 +25,7 @@ app.use(apiSecurity.apiLimiter);
 // app.use(cors());
 app.use(
   cors({
-    origin: "http://localhost:3001",
+    origin: "https://pruebarailway-production-13a0.up.railway.app",
     credentials: true,
   }),
 );
