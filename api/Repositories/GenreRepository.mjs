@@ -22,11 +22,13 @@ async function createGenre(genre) {
 async function getGenreById(id) {
   const client = await pool.connect();
   try {
-    const result = await client.query("SELECT * FROM genres WHERE id = $1", [
-      id,
-    ]);
-    return result.rows[0];
+    const result = await client.query(
+      "SELECT * FROM genres WHERE id = $1 AND deleted_at IS NULL",
+      [id],
+    );
+    return result.rows[0] ? new GenreModel(result.rows[0]) : null;
   } catch (error) {
+    console.log("Error en getGenreById", error);
     throw error;
   } finally {
     client.release();
@@ -48,20 +50,51 @@ async function getGenreByName(name) {
       console.log("No encontrado");
     }
 
-    return new GenreModel(result.rows[0]);
+    return result.rows[0] ? new GenreModel(result.rows[0]) : null;
   } catch (error) {
+    console.log("Error en getGenreByName", error);
     throw error;
   } finally {
     client.release();
   }
 }
 
-async function getAllGenres() {
+async function getAllGenres(page = 1, limit = 10) {
   const client = await pool.connect();
   try {
-    const result = await client.query("SELECT * FROM genres");
+    const offset = (page - 1) * limit;
+
+    const countRes = await client.query("SELECT COUNT(*) FROM genres");
+    const totalItems = parseInt(countRes.rows[0].count);
+
+    const result = await client.query(
+      "SELECT * FROM genres ORDER BY name LIMIT $1 OFFSET $2",
+      [limit, offset],
+    );
+
+    return {
+      data: result.rows.map((genre) => new GenreModel(genre)),
+      totalItems: totalItems,
+      totalPages: Math.ceil(totalItems / limit),
+      currentPage: parseInt(page),
+    };
+  } catch (error) {
+    console.log("Error en getAllGenres (paginado)", error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getGenres() {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      "SELECT * FROM genres WHERE deleted_at IS NULL ORDER BY name",
+    );
     return result.rows.map((genre) => new GenreModel(genre));
   } catch (error) {
+    console.log("Error en getGenres (completo)", error);
     throw error;
   } finally {
     client.release();
@@ -84,6 +117,7 @@ async function updateGenre(genre) {
     await client.query("COMMIT");
     return result.rows[0];
   } catch (error) {
+    console.log("Error en updateGenre", error);
     await client.query("ROLLBACK");
     throw error;
   } finally {
@@ -102,6 +136,7 @@ async function deleteGenre(id) {
     await client.query("COMMIT");
     return result.rows[0];
   } catch (error) {
+    console.log("Error en deleteGenre", error);
     await client.query("ROLLBACK");
     throw error;
   } finally {
@@ -114,11 +149,11 @@ async function getGenresMostSold() {
   try {
     const result = await client.query(
       `select name, sum(oi.quantity) as total_sold 
-      from genres g join book_genres bg on g.id = bg.genre_id 
-        join order_items oi on bg.book_id = oi.book_id 
-      group by g.id, g.name 
-      order by 2 desc 
-      limit 5;`,
+       from genres g join book_genres bg on g.id = bg.genre_id 
+         join order_items oi on bg.book_id = oi.book_id 
+       group by g.id, g.name 
+       order by 2 desc 
+       limit 5;`,
     );
     return result.rows.map((row) => {
       const genre = new GenreModel(row);
@@ -126,6 +161,7 @@ async function getGenresMostSold() {
       return genre;
     });
   } catch (error) {
+    console.log("Error en getGenresMostSold", error);
     throw error;
   } finally {
     client.release();
@@ -137,6 +173,7 @@ export default {
   getGenreById,
   getGenreByName,
   getAllGenres,
+  getGenres,
   updateGenre,
   deleteGenre,
   getGenresMostSold,

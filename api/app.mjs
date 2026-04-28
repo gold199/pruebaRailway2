@@ -15,7 +15,7 @@ import orderItemRouter from "./router/OrderItemRouter.mjs";
 import apiSecurity from "./middlewares/controlUserAgent.mjs";
 import * as userAgent from "express-useragent";
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT;
 const app = express();
 
 app.use(userAgent.express());
@@ -59,6 +59,15 @@ app.use("/bookGenre", bookGenreRouter);
 //   },
 //   orderRouter
 // );
+
+// Captura errores asíncronos no manejados — evita que nodemon reinicie el servidor
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("⚠️ Unhandled Rejection:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("⚠️ Uncaught Exception:", error);
+});
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);

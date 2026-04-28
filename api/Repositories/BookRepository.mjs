@@ -1,6 +1,10 @@
-import Book from "../models/bookModel.mjs";
+import Book from "../models/BookModel.mjs";
 import pool from "../config/database.mjs";
+import BookGenreRepository from "./BookGenreRepository.mjs";
+import BookAuthorRepository from "./BookAuthorRepository.mjs";
 import axios from "axios";
+
+// En esta funcion se crea un libro, en el año de lanzamiento si es 0 se guarda como null para mantener la consistencia de los datos
 
 async function createBook(book) {
   const client = await pool.connect();
@@ -13,7 +17,7 @@ async function createBook(book) {
         book.isbn,
         book.price,
         book.stock,
-        book.releashed_year,
+        book.releashed_year || null,
         book.format,
         book.language,
         book.pages,
@@ -32,18 +36,23 @@ async function createBook(book) {
   }
 }
 
-async function getBookById(id) {
-  const client = await pool.connect();
+async function getBookById(id, options = {}) {
+  const client = options.client || pool;
+  const withRelations = options.withRelations || false;
+
+  console.log("El id es (repo): ", id);
+
   try {
     const result = await client.query(
-      "SELECT b.* FROM books b right join publishers p ON b.publisher_id = p.id WHERE b.id = $1",
+      "SELECT b.* FROM books b join publishers p ON b.publisher_id = p.id WHERE b.id = $1 AND b.DELETED_AT IS NULL",
       [id],
     );
+
+    if (result.rows.length === 0) return null;
+
     return new Book(result.rows[0]);
   } catch (error) {
     throw error;
-  } finally {
-    client.release();
   }
 }
 
@@ -51,7 +60,7 @@ async function getBookByTitle(title) {
   const client = await pool.connect();
   try {
     const result = await client.query(
-      "SELECT b.* FROM books b right join publishers p ON b.publisher_id = p.id WHERE b.title = $1",
+      "SELECT b.* FROM books b join publishers p ON b.publisher_id = p.id WHERE b.title = $1",
       [title],
     );
     return new Book(result.rows[0]);
@@ -62,49 +71,72 @@ async function getBookByTitle(title) {
   }
 }
 
-async function updateBook(id, book) {
+async function updateBook(id, bookData, genreIds = null, authorIds = null) {
   const client = await pool.connect();
-
-  console.log(`Datos del libro a modificar: ${book}`);
-
   try {
+    // Iniciamos LA transacción que envolverá todo
     await client.query("BEGIN");
+
+    // 1. Actualizamos los datos básicos del libro
     const result = await client.query(
       `UPDATE books 
        SET 
-         title = COALESCE($1, title),
-         isbn = COALESCE($2, isbn),
-         price = COALESCE($3, price),
-         stock = COALESCE($4, stock),
-         releashed_year = COALESCE($5, releashed_year),
-         format = COALESCE($6, format),
-         language = COALESCE($7, language),
-         pages = COALESCE($8, pages),
-         synopsis = COALESCE($9, synopsis),
-         cover_url = COALESCE($10, cover_url),
-         publisher_id = COALESCE($11, publisher_id),
-         updated_at = NOW()
+          title = COALESCE($1, title),
+          isbn = COALESCE($2, isbn),
+          price = COALESCE($3, price),
+          stock = COALESCE($4, stock),
+          releashed_year = COALESCE($5, releashed_year),
+          format = COALESCE($6, format),
+          language = COALESCE($7, language),
+          pages = COALESCE($8, pages),
+          synopsis = COALESCE($9, synopsis),
+          cover_url = COALESCE($10, cover_url),
+          publisher_id = COALESCE($11, publisher_id),
+          updated_at = NOW()
        WHERE id = $12 
        RETURNING *`,
       [
-        book.title,
-        book.isbn,
-        book.price,
-        book.stock,
-        book.releashed_year,
-        book.format,
-        book.language,
-        book.pages,
-        book.synopsis,
-        book.cover_url,
-        book.publisher_id,
+        bookData.title,
+        bookData.isbn,
+        bookData.price,
+        bookData.stock,
+        bookData.releashed_year,
+        bookData.format,
+        bookData.language,
+        bookData.pages,
+        bookData.synopsis,
+        bookData.cover_url,
+        bookData.publisher_id,
         id,
       ],
     );
+
+    // 2. SOLO sincronizar géneros si se enviaron en el formulario
+    // Si genre_ids es null o undefined, no entramos aquí y se mantienen los actuales
+    if (genreIds !== null && Array.isArray(genreIds)) {
+      await BookGenreRepository.syncBookGenres(id, genreIds, client);
+    }
+
+    // 3. SOLO sincronizar autores si se enviaron
+    if (authorIds !== null && Array.isArray(authorIds)) {
+      await client.query("DELETE FROM book_authors WHERE book_id = $1", [id]);
+      if (authorIds.length > 0) {
+        for (const authorId of authorIds) {
+          await client.query(
+            "INSERT INTO book_authors (book_id, author_id) VALUES ($1, $2)",
+            [id, authorId],
+          );
+        }
+      }
+    }
+
+    // Si todo salió bien, guardamos cambios
     await client.query("COMMIT");
     return result.rows[0];
   } catch (error) {
+    // Si ALGO falla (libro, géneros o autores), deshacemos TODO
     await client.query("ROLLBACK");
+    console.error("Error en updateBook (Transaction):", error);
     throw error;
   } finally {
     client.release();
@@ -115,7 +147,10 @@ async function deleteBook(id) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM books where id = $1", [id]);
+    await client.query("UPDATE books SET deleted_at = NOW() WHERE id = $1", [
+      id,
+    ]);
+    // await client.query("DELETE FROM books where id = $1", [id]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -129,7 +164,7 @@ async function getBooksByPublisherId(publisher_id) {
   const client = await pool.connect();
   try {
     const result = await client.query(
-      "SELECT b.*, p.name as publisher_name FROM books b right join publishers p ON b.publisher_id = p.id WHERE b.publisher_id = $1",
+      "SELECT b.*, p.name as publisher_name FROM books b join publishers p ON b.publisher_id = p.id WHERE b.publisher_id = $1",
       [publisher_id],
     );
     return result.rows.map((book) => new Book(book));
@@ -314,6 +349,10 @@ async function getAllBooks(page = 1, filters = {}) {
       values.push(filters.author);
     }
 
+    if (filters.deleted === "true") {
+      whereClauses.push(`b.deleted_at IS NOT NULL`);
+    }
+
     const whereSQL =
       whereClauses.length > 0 ? " WHERE " + whereClauses.join(" AND ") : "";
 
@@ -342,25 +381,35 @@ async function getAllBooks(page = 1, filters = {}) {
 }
 
 async function updateStock(book_id, quantity, client) {
-  await client.query("UPDATE books SET stock = stock - $1 WHERE id = $2", [
-    quantity,
-    book_id,
-  ]);
+  const result = await client.query(
+    "UPDATE books SET stock = stock - $1 WHERE id = $2 AND stock >= $1 RETURNING stock",
+    [quantity, book_id],
+  );
+  if (result.rowCount === 0) {
+    throw new Error(`No hay suficiente stock o el libro ${book_id} no existe`);
+  }
 }
 
-async function getBooksByIds(bookIds) {
-  const client = await pool.connect();
+async function getBooksByIds(bookIds, externalClient = null, lock = false) {
+  const client = externalClient || (await pool.connect());
+
   try {
-    const result = await client.query(
-      "SELECT * FROM books WHERE id = ANY($1)",
-      [bookIds],
-    );
+    let query = "SELECT * FROM books WHERE id = ANY($1)";
+
+    if (lock) {
+      // Bloquear porque usa MVCC (Multi Version Concurrency Control como oracle)
+      // FOR UPDATE le dice a Postgres: "Bloquea estas filas hasta que mi transacción haga COMMIT"
+      query += " FOR UPDATE";
+    }
+
+    const result = await client.query(query, [bookIds]);
     return result.rows.map((book) => new Book(book));
   } catch (error) {
-    console.log(error);
+    console.error("Error en getBooksByIds:", error);
     throw error;
   } finally {
-    client.release();
+    // Solo liberamos si no nos pasaron un cliente externo
+    if (!externalClient) client.release();
   }
 }
 
@@ -369,7 +418,7 @@ async function getBooksMostSold() {
   try {
     const result = await client.query(
       `select b.*, sum(oi.quantity) as total_sold 
-      from books b right join order_items oi on b.id = oi.book_id 
+      from books b join order_items oi on b.id = oi.book_id 
       group by b.id 
       order by total_sold desc
       LIMIT 5;`,
@@ -386,6 +435,63 @@ async function getBooksMostSold() {
   }
 }
 
+async function restoreBook(id, client = pool) {
+  // Nota: 'client' puede ser el objeto 'pool' o un 'client' de una transacción
+  try {
+    const result = await client.query(
+      "UPDATE books SET deleted_at = NULL WHERE id = $1 RETURNING *",
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return null; // O puedes lanzar un error si prefieres
+    }
+
+    return result.rows[0];
+  } catch (error) {
+    console.error("Error en restoreBook (Repository): ", error.message);
+    throw error;
+  }
+}
+// async function restoreBook(id) {
+//   const client = await pool.connect();
+//   try {
+//     await client.query("BEGIN");
+//     const result = await client.query(
+//       "UPDATE books SET deleted_at = NULL WHERE id = $1 RETURNING *",
+//       [id],
+//     );
+//     await client.query("COMMIT");
+//     return result.rows[0];
+//   } catch (error) {
+//     await client.query("ROLLBACK");
+//     console.error("Error en restoreBook (Repository): ", error);
+//     throw error;
+//   } finally {
+//     client.release();
+//   }
+// }
+
+async function deleteBooksFromDeletedPublishers(publisherId, connection) {
+  const sql = `
+        UPDATE books 
+        SET deleted_at = NOW() 
+        WHERE publisher_id = $1 AND deleted_at IS NULL
+    `;
+  // Usamos la conexión que nos llega del servicio
+  const result = await connection.query(sql, [publisherId]);
+  return result;
+}
+
+async function restoreBooksFromPublisher(publisherId, client) {
+  const sql = `
+    UPDATE books 
+    SET deleted_at = NULL 
+    WHERE publisher_id = $1 AND deleted_at IS NOT NULL
+  `;
+  return await client.query(sql, [publisherId]);
+}
+
 export default {
   createBook,
   getBookById,
@@ -400,4 +506,7 @@ export default {
   getBooksByIds,
   getBooksMostSold,
   getBooksCarrusel,
+  restoreBook,
+  deleteBooksFromDeletedPublishers,
+  restoreBooksFromPublisher,
 };

@@ -1,6 +1,7 @@
 import RepoBook from "../Repositories/BookRepository.mjs";
 import BookAuthor from "../Repositories/BookAuthorRepository.mjs";
 import BookGenre from "../Repositories/BookGenreRepository.mjs";
+import BookRepository from "../Repositories/BookRepository.mjs";
 
 async function createBook(req, res) {
   // Controlador de creación de libro
@@ -46,8 +47,13 @@ async function createBook(req, res) {
 
 async function getBookById(req, res) {
   // Controlador de obtención de libro por ID
+
+  const { id } = req.params;
+
+  console.log("El id es: ", id  );
+
   try {
-    const book = await RepoBook.getBookById(req.params.id);
+    const book = await RepoBook.getBookById(id);
     res.status(200).json(book);
   } catch (error) {
     console.error(error);
@@ -77,43 +83,19 @@ async function getBooksByPublisherId(req, res) {
 }
 
 async function updateBook(req, res) {
-  // Controlador de actualización de libro
   const bookId = req.params.id;
-  const updateData = req.body;
-
-  console.log(updateData);
+  const { author_ids, genre_ids, ...bookData } = req.body;
 
   try {
-    // Actualiza campos básicos del libro
-    await RepoBook.updateBook(bookId, updateData);
+    // 1. Llamamos a una única función que se encarga de TODO en una transacción
+    await RepoBook.updateBook(bookId, bookData, genre_ids, author_ids);
 
-    // Actualiza autores si se enviaron
-    if (updateData.author_ids !== undefined) {
-      await BookAuthor.deleteByBookId(bookId); // borra antiguas
-      for (const authorId of updateData.author_ids) {
-        await BookAuthor.createBookAuthor({
-          book_id: bookId,
-          author_id: authorId,
-        });
-      }
-    }
+    // 2. Recuperamos el libro actualizado con sus nuevas relaciones
+    const updatedBook = await RepoBook.getBookById(bookId);
 
-    // Actualiza géneros si se enviaron
-    if (updateData.genre_ids !== undefined) {
-      await BookGenre.deleteByBookId(bookId); // borra antiguas
-      for (const genreId of updateData.genre_ids) {
-        await BookGenre.createBookGenre({
-          book_id: bookId,
-          genre_id: genreId,
-        });
-      }
-    }
-
-    const updatedBook = await RepoBook.getBookById(bookId, {
-      withRelations: true,
-    });
     res.json(updatedBook);
   } catch (error) {
+    console.error("Error actualizando libro:", error);
     res.status(400).json({ message: error.message });
   }
 }
@@ -200,6 +182,7 @@ async function getAllBooks(req, res) {
       maxPrice: req.query.maxPrice || null,
       genre: req.query.genre || null,
       author: req.query.author || null,
+      deleted: req.query.deleted || "false",
     };
 
     const result = await RepoBook.getAllBooks(page, filters);
@@ -221,6 +204,67 @@ async function getMostSoldBooks(req, res) {
   }
 }
 
+async function restoreBook(req, res) {
+  try {
+    const { id } = req.params;
+
+    const result = await BookRepository.restoreBook(id);
+
+    res.status(200).json({
+      message: "Libro restaurado con éxito",
+      ...result,
+    });
+  } catch (error) {
+    console.error("Error en restoreBook (Controlador):", error.message);
+
+    // Si el error es el que lanzamos en el servicio por la regla de negocio
+    if (
+      error.message.includes("archivada") ||
+      error.message.includes("eliminada")
+    ) {
+      return res.status(400).json({
+        error: error.message,
+      });
+    }
+
+    // Error genérico para fallos de base de datos o conexión
+    res.status(500).json({
+      error: "Error interno al intentar restaurar el libro",
+    });
+  }
+}
+// async function restoreBook(req, res) {
+//   try {
+//     const { id } = req.params;
+
+//     // Llamamos al servicio en lugar del repositorio
+//     // Este método ya valida si la editorial está activa y maneja la transacción
+//     const result = await PublisherBookService.restoreSingleBook(id);
+
+//     res.status(200).json({
+//       message: "Libro restaurado con éxito",
+//       ...result,
+//     });
+//   } catch (error) {
+//     console.error("Error en restoreBook (Controlador):", error.message);
+
+//     // Si el error es el que lanzamos en el servicio por la regla de negocio
+//     if (
+//       error.message.includes("archivada") ||
+//       error.message.includes("eliminada")
+//     ) {
+//       return res.status(400).json({
+//         error: error.message,
+//       });
+//     }
+
+//     // Error genérico para fallos de base de datos o conexión
+//     res.status(500).json({
+//       error: "Error interno al intentar restaurar el libro",
+//     });
+//   }
+// }
+
 export default {
   createBook,
   getBookById,
@@ -233,4 +277,5 @@ export default {
   getAllBooks,
   getMostSoldBooks,
   getBooksCarrusel,
+  restoreBook,
 };
