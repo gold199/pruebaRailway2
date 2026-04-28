@@ -2,10 +2,8 @@ import Order from "../models/OrderModel.mjs";
 import pool from "../config/database.mjs";
 import OrderItemsRepository from "./OrderItemsRepository.mjs";
 import BookRepository from "./BookRepository.mjs";
-import nodemailer from "nodemailer"
-import stripe, { Stripe } from "stripe"
 
-async function createOrder({ user_id, items }) {
+async function createOrder({ user_id, items, shipping_address }) {
   const client = await pool.connect(); // Aquí SÍ usamos client para la transacción
 
   try {
@@ -14,7 +12,11 @@ async function createOrder({ user_id, items }) {
     if (!items || items.length === 0) throw new Error("El carrito está vacío");
 
     const bookIds = items.map((item) => item.book_id);
-    const books = await BookRepository.getBooksByIds(bookIds);
+
+    // Se pone true para bloquear las filas hasta que haga commit
+    // Evita que otro usuario compre el mismo libro al mismo tiempo
+    // Tambien pasamos la conexión actual para que todo se haga en la misma transacción
+    const books = await BookRepository.getBooksByIds(bookIds, client, true);
 
     let total = 0;
     const validatedItems = [];
@@ -27,13 +29,16 @@ async function createOrder({ user_id, items }) {
           `Stock insuficiente para "${book.title}". Disponible: ${book.stock}`,
         );
       }
-      total += book.price * item.quantity;
+
+      // Ponemos Number() para evitar errores de tipo por si postgre devuelve string
+
+      total += Number(book.price) * item.quantity;
       validatedItems.push({ ...item, currentPrice: book.price });
     }
 
     const orderResult = await client.query(
-      "INSERT INTO orders (user_id, total, status) VALUES ($1, $2, 'PENDIENTE') RETURNING *",
-      [user_id, total],
+      "INSERT INTO orders (user_id, total, status, shipping_address) VALUES ($1, $2, 'PENDIENTE', $3) RETURNING *",
+      [user_id, total, shipping_address],
     );
     const order = new Order(orderResult.rows[0]);
 
@@ -52,7 +57,19 @@ async function createOrder({ user_id, items }) {
     }
 
     await client.query("COMMIT");
-    return order;
+    // return order;
+
+    return {
+      ...order,
+      items: validatedItems.map((item) => {
+        const bookInfo = books.find((b) => b.id == item.book_id);
+        return {
+          title: bookInfo.title, // <--- Esto es lo que necesita el email
+          quantity: item.quantity,
+          price: item.currentPrice,
+        };
+      }),
+    };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -119,130 +136,6 @@ async function getAllOrders() {
   return orders;
 }
 
-
-async function payment(items,user){
-  console.log(user)
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-  const bookIds = items.map((item) => item.book_id);
-  const books = await BookRepository.getBooksByIds(bookIds);
-  let total = 0;
-  const validatedItems = [];
-
-    for (const item of items) {
-      const book = books.find((b) => b.id == item.book_id);
-
-      if (!book) throw new Error(`Libro no encontrado: ID ${item.book_id}`);
-      if (book.stock < item.quantity) {
-        throw new Error(
-          `Stock insuficiente para "${book.title}". Disponible: ${book.stock}`
-        );
-      }
-
-      total += book.price * item.quantity;
-      // Guardamos el precio actual para asegurar la consistencia en el detalle
-      validatedItems.push({ ...item, currentPrice: book.price, title: book.title});
-    }
-  const arrayStripeObjects = []
-  validatedItems.forEach(books => {
-    const lineItems = {
-      price_data: {
-        currency: 'eur',
-        product_data: {
-          name: books.title,
-        },
-        unit_amount: (books.currentPrice * 100).toFixed(0),
-      },
-      quantity: books.quantity,
-    }
-    arrayStripeObjects.push(lineItems)
-  });
-  
-  const session = await stripe.checkout.sessions.create({
-    line_items: arrayStripeObjects,
-    mode: 'payment',
-    success_url: 'https://pruebarailway-production-a4d1.up.railway.app//user/myOrders',
-  })
-  
-  sendGmailTest(validatedItems,user,total)
-
-  return session
-}
-
-
-async function sendGmailTest(validatedItems,user,total) {
-
-  const emailHtml = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; padding: 20px; border-radius: 8px;">
-      <h2 style="text-align: center; color: #333;">Recibo de Compra</h2>
-      <p>Hola ${user.name},</p>
-      <p>Gracias por tu compra. Aquí tienes el resumen de tu pedido:</p>
-
-      <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-        <thead>
-          <tr>
-            <th style="border-bottom: 1px solid #ddd; padding: 8px; text-align: left;">Producto</th>
-            <th style="border-bottom: 1px solid #ddd; padding: 8px; text-align: center;">Cantidad</th>
-            <th style="border-bottom: 1px solid #ddd; padding: 8px; text-align: right;">Precio</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${validatedItems
-            .map(
-              products => `
-            <tr>
-              <td style="padding: 8px; border-bottom: 1px solid #eee;">${products.title}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${products.quantity}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${products.currentPrice}€</td>
-            </tr>
-          `
-            )
-            .join('')}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td colspan="2" style="padding: 8px; text-align: right; font-weight: bold;">Total:</td>
-            <td style="padding: 8px; text-align: right; font-weight: bold;">${total.toFixed(2)}€</td>
-          </tr>
-        </tfoot>
-      </table>
-
-      <p style="margin-top: 20px;">Fecha de compra: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}</p>
-
-      <p>Si tienes alguna duda, contáctanos a <a href="mailto:soporte@tudominio.com">soporte@tudominio.com</a>.</p>
-
-      <p style="text-align: center; color: #888; font-size: 12px;">© ${new Date().getFullYear()} Tu Tienda. Todos los derechos reservados.</p>
-    </div>
-  `;
-
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      type: "OAuth2",
-      user: "izanferlaf@gmail.com",
-      clientId: process.env.CLIENT_ID,      
-      clientSecret: process.env.CLIENT_SECRET,
-      refreshToken: process.env.REFRESH_TOKEN
-    },
-  });
-
-  const mailOptions = {
-    from: "izanferlaf@gmail.com",
-    to: user.email, 
-    subject: "Test Email from Nodemailer Gmail OAuth2",
-    html: emailHtml,
-  };
-
-  const client = await pool.connect();
-  await client.query("BEGIN");
-  const orderResult = await client.query(
-      "UPDATE orders SET status = $1 WHERE user_id = $2 AND created_at >= NOW() - INTERVAL '1 minute';",
-      ["PAGADO", user.id]
-    );
-  await client.query("COMMIT");
-  await transporter.sendMail(mailOptions);
-
-}
-
 export default {
   createOrder,
   getOrderById,
@@ -250,5 +143,4 @@ export default {
   updateOrder,
   deleteOrder,
   getAllOrders,
-  payment
 };
