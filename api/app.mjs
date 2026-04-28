@@ -19,8 +19,8 @@ const port = process.env.PORT || 3000;
 const app = express();
 
 app.use(userAgent.express());
-app.use(apiSecurity.filterIA);
-app.use(apiSecurity.apiLimiter);
+// app.use(apiSecurity.filterIA);
+// app.use(apiSecurity.apiLimiter);
 
 // app.use(cors());
 app.use(
