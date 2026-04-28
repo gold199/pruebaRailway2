@@ -160,7 +160,7 @@ async function payment(items,user){
   const session = await stripe.checkout.sessions.create({
     line_items: arrayStripeObjects,
     mode: 'payment',
-    success_url: 'pruebarailway-production-229f.up.railway.app//user/myOrders',
+    success_url: 'pruebarailway-production-a4d1.up.railway.app//user/myOrders',
   })
   
   sendGmailTest(validatedItems,user,total)
