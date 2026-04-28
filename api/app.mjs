@@ -25,7 +25,7 @@ app.use(userAgent.express());
 // app.use(cors());
 app.use(
   cors({
-    origin: "pruebarailway-production-a4d1.up.railway.app",
+    origin: "https://pruebarailway-production-a4d1.up.railway.app",
     credentials: true,
   }),
 );
