@@ -138,20 +138,21 @@ async function getAllAuthors(
   deleted = false,
   onlyWithBooks = false, // <-- Mostrar autores borrados en el filtro de catalogo
   includeAll = false, // <-- Mostrar autores borrados en la tabla de admin sin usar el filtro de solo borrados
+  mostRated = false,
+  leastRated = false,
+  mostBought = false,
+  leastBought = false,
+   
 ) {
   const client = await pool.connect();
   try {
-    // 1. Usamos DISTINCT para no repetir autores si tienen muchos libros
-    let query = "SELECT DISTINCT a.* FROM authors a ";
-
-    // Si solo queremos autores con libros, necesitamos unir las tablas
-    if (onlyWithBooks) {
-      query += " INNER JOIN book_authors ba ON a.id = ba.author_id ";
-      query += " INNER JOIN books b ON ba.book_id = b.id ";
-    }
 
     let whereClauses = [];
     let params = [];
+    let joinClauses = [];
+    let groupBy = [];
+    let OrderClause = [];
+    let selectClause = [];
 
     // Filtro de país
     if (country) {
@@ -161,23 +162,74 @@ async function getAllAuthors(
 
     // Lógica inteligente de borrado
     if (onlyWithBooks) {
-      whereClauses.push("b.deleted_at IS NULL");
+      whereClauses.push("b.deleted_at IS NULL ");
     } else if (includeAll) {
       // CASO ADMIN TOTAL: No añadimos filtro de deleted_at.
       // Traerá tanto NULL como NOT NULL.
     } else {
       if (deleted) {
-        whereClauses.push("a.deleted_at IS NOT NULL"); // Solo papelera
+        whereClauses.push("a.deleted_at IS NOT NULL "); // Solo papelera
       } else {
-        whereClauses.push("a.deleted_at IS NULL"); // Solo activos (Para formularios)
+        whereClauses.push("a.deleted_at IS NULL "); // Solo activos (Para formularios)
       }
     }
+
+    if(mostRated === true){
+      selectClause.push(", COALESCE(round(avg(rating), 1),0)")
+      joinClauses.push("full outer join reviews on ba.book_id = reviews.book_id")
+      groupBy.push("a.id")
+      OrderClause.push("COALESCE(round(avg(rating), 1),0) desc")
+      
+    }
+    if(leastRated === true){
+      selectClause.push(", COALESCE(round(avg(rating), 1),0)")
+      joinClauses.push("full outer join reviews on ba.book_id = reviews.book_id")
+      groupBy.push("a.id")
+      OrderClause.push("COALESCE(round(avg(rating), 1),0) asc")
+      
+    }
+    if(mostBought === true){
+      selectClause.push(", count(order_items.book_id)")
+      joinClauses.push("full outer join order_items on ba.book_id = order_items.book_id")
+      groupBy.push("a.id")
+      groupBy.push("order_items.book_id")
+      OrderClause.push("count(order_items.book_id) desc")
+    }
+    if(leastBought === true){
+      selectClause.push(", count(order_items.book_id)")
+      joinClauses.push("full outer join order_items on ba.book_id = order_items.book_id")
+      groupBy.push("a.id")
+      groupBy.push("order_items.book_id")
+      OrderClause.push("count(order_items.book_id) asc")
+    }
+
+    const selectSQl = selectClause.length > 0 ? selectClause.join("") : ""
+
+    // 1. Usamos DISTINCT para no repetir autores si tienen muchos libros
+    let query = `SELECT DISTINCT a.* ${selectSQl} FROM authors a `;
+
+    // Si solo queremos autores con libros, necesitamos unir las tablas
+    if (onlyWithBooks) {
+      query += " INNER JOIN book_authors ba ON a.id = ba.author_id ";
+      query += " INNER JOIN books b ON ba.book_id = b.id ";
+    } else if (joinClauses.length > 0) {
+      // Necesitamos ba si vamos a unir con reviews u order_items
+      query += " LEFT JOIN book_authors ba ON a.id = ba.author_id ";
+    }
+
+    const joinSQL = joinClauses.length > 0 ? joinClauses.join(" ") : "";
+    query += joinSQL + " ";
 
     if (whereClauses.length > 0) {
       query += " WHERE " + whereClauses.join(" AND ");
     }
 
-    query += " ORDER BY a.name ASC ";
+    const groupBySQL = groupBy.length > 0 ? groupBy.join(",") : "a.id";
+    const orderBySQL = OrderClause.length > 0 ? OrderClause.join(",") : "a.name ASC";
+
+    query += " GROUP BY " + groupBySQL + " ORDER BY " + orderBySQL;
+
+    console.log("SQL Query:", query);
 
     // Paginación (Tu lógica original adaptada)
     if (page !== null && limit !== null) {

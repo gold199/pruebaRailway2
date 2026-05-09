@@ -1,5 +1,12 @@
 import express from "express";
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, "./config/.env") });
 import cors from "cors";
 import bookRouter from "./router/BookRouter.mjs";
 import authorRouter from "./router/AuthorRouter.mjs";
@@ -12,12 +19,21 @@ import userRouter from "./router/UserRouter.mjs";
 import bookAuthorRouter from "./router/BookAuthorRouter.mjs";
 import bookGenreRouter from "./router/BookGenreRouter.mjs";
 import orderItemRouter from "./router/OrderItemRouter.mjs";
+import userFavoriteGenresRouter from "./router/UserFavoriteGenresRouter.mjs";
 import apiSecurity from "./middlewares/controlUserAgent.mjs";
 import * as userAgent from "express-useragent";
 import helmet from "helmet";
 
 const port = 3000;
 const app = express();
+
+// En producción, Express debe confiar en el proxy inverso (nginx, Caddy, etc.)
+// para leer la IP real del cliente desde X-Forwarded-For.
+// Sin esto, req.ip siempre es 127.0.0.1 y el rate limit afecta a todos por igual.
+
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", true); // Railway: múltiples saltos internos de proxy
+}
 
 // Inclusión de helmet para el uso de cabeceras de seguridad
 app.use(
@@ -57,6 +73,7 @@ app.use("/orders", orderRouter);
 app.use("/auth", authRouter);
 app.use("/users", userRouter);
 app.use("/orderItems", orderItemRouter);
+app.use("/users/favorites", userFavoriteGenresRouter);
 app.use("/review", reviewRouter);
 
 app.use("/bookAuthor", bookAuthorRouter);

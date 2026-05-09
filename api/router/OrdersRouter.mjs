@@ -19,6 +19,12 @@ router.get(
 //   OrderController.createStripeSession,
 // );
 
+router.get(
+  "/stripe/confirm-session",
+  AuthMiddleware.authenticate,
+  OrderController.confirmStripeSession,
+);
+
 router.post(
   "/",
   AuthMiddleware.authenticate,
@@ -42,11 +48,21 @@ router.put(
   OrderController.updateOrder,
 );
 
-router.delete(
-  "/:id",
+// router.delete(
+//   "/:id",
+//   AuthMiddleware.authenticate,
+//   AuthMiddleware.requireAdmin,
+//   OrderController.deleteOrder,
+// );
+
+router.patch(
+  "/cancel/:id",
   AuthMiddleware.authenticate,
   AuthMiddleware.requireAdmin,
-  OrderController.deleteOrder,
+  OrderController.cancelOrder,
 );
+
+router.post("/payment", OrderController.paymentAndEmail);
+
 
 export default router;

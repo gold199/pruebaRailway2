@@ -10,11 +10,30 @@ router.get("/features", bookController.getBookByFeatures);
 router.get("/publisher/:id", bookController.getBooksByPublisherId);
 
 router.get("/mostSold", bookController.getMostSoldBooks);
+router.get("/bestRated", bookController.getBestRatedBooks);
 router.get("/carrusel", bookController.getBooksCarrusel);
 router.get("/title/:title", bookController.getBookByTitle);
 router.get("/updateCover", bookController.updateAllCovers);
+
+router.get(
+  "/recommendations/mostSold/:userId",
+  bookController.getMostSoldByFavoriteGenres,
+);
+router.get(
+  "/recommendations/bestRated/:userId",
+  bookController.getBestRatedByFavoriteGenres,
+);
+router.get(
+  "/recommendations/combined/:userId",
+  bookController.getRecommendedByFavoriteGenres,
+);
+
 router.get("/:id", bookController.getBookById);
 router.get("/", bookController.getAllBooks);
+router.post(
+  "/mostSoldRecommendation",
+  bookController.getMostSoldBookByGenreForUser,
+);
 
 // Rutas protegidas
 router.post(
