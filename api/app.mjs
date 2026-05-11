@@ -24,7 +24,7 @@ import apiSecurity from "./middlewares/controlUserAgent.mjs";
 import * as userAgent from "express-useragent";
 import helmet from "helmet";
 
-const port = 3000;
+const port = process.env.PORT;
 const app = express();
 
 // En producción, Express debe confiar en el proxy inverso (nginx, Caddy, etc.)
