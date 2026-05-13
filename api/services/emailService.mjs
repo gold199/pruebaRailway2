@@ -16,7 +16,7 @@ const SENDER_EMAIL = process.env.EMAIL_USER || "izanferlaf@gmail.com";
 // });
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
   family: 4,
   port: 587,
   secure: false,
