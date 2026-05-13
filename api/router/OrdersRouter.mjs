@@ -55,11 +55,37 @@ router.put(
 //   OrderController.deleteOrder,
 // );
 
-router.patch(
-  "/cancel/:id",
+router.post(
+  "/user/cancel/:id",
+  AuthMiddleware.authenticate,
+  OrderController.userCancelOrder,
+);
+
+router.post(
+  "/admin/cancel/:id",
   AuthMiddleware.authenticate,
   AuthMiddleware.requireAdmin,
   OrderController.cancelOrder,
+);
+
+router.post(
+  "/user/request-return/:id",
+  AuthMiddleware.authenticate,
+  OrderController.userRequestReturn,
+);
+
+router.post(
+  "/admin/confirm-return/:id",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireAdmin,
+  OrderController.adminConfirmReturn,
+);
+
+router.post(
+  "/admin/force-return/:id",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireAdmin,
+  OrderController.adminForceReturn,
 );
 
 router.post("/payment", OrderController.paymentAndEmail);
