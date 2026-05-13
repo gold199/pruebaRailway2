@@ -17,6 +17,7 @@ const SENDER_EMAIL = process.env.EMAIL_USER || "izanferlaf@gmail.com";
 
 const transporter = nodemailer.createTransport({
   service: "gmail",
+  family: 4,
   auth: {
     user: SENDER_EMAIL,
     pass: process.env.EMAIL_PASSWORD,
