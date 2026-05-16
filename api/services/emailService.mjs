@@ -1,6 +1,6 @@
 // import nodemailer from "nodemailer";
 
-// const FRONTEND_URL = process.env.FRONTEND_URL || "https://pruebarailway-production-13a0.up.railway.app";
+// const FRONTEND_URL = process.env.FRONTEND_URL || "https://booklyestore.up.railway.app";
 // const SENDER_NAME = "Bookly S.L.";
 // const SENDER_EMAIL = process.env.EMAIL_USER || "izanferlaf@gmail.com";
 
@@ -416,7 +416,7 @@ const brevo = new BrevoClient({
   maxRetries: 3,
 });
 
-const FRONTEND_URL = process.env.FRONTEND_URL || "https://pruebarailway-production-13a0.up.railway.app";
+const FRONTEND_URL = process.env.FRONTEND_URL || "https://booklyestore.up.railway.app";
 const SENDER_NAME = "Bookly S.L.";
 const SENDER_EMAIL = process.env.EMAIL_USER || "izanferlaf@gmail.com";
 

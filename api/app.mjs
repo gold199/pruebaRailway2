@@ -59,7 +59,7 @@ app.use(apiSecurity.apiLimiter);
 // app.use(cors());
 app.use(
   cors({
-    origin: process.env.ALLOWED_ORIGIN || "https://pruebarailway-production-13a0.up.railway.app",
+    origin: process.env.ALLOWED_ORIGIN || "https://booklyestore.up.railway.app",
     credentials: true,
   }),
 );
