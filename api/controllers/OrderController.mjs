@@ -66,21 +66,44 @@ async function getOrdersByUser(req, res) {
 async function updateOrder(req, res) {
   try {
     const update_data = { id: req.params.id, ...req.body }; // Crea un objeto que añade el id al resto de parámetros del body
+
+    console.log("Datos de actualización: ", update_data);
+
     const order = await OrderRepository.updateOrder(update_data);
     res.status(200).json(order);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Error al actualizar el autor" });
+    res.status(500).json({ error: "Error al actualizar el estado del pedido" });
   }
 }
 
 async function cancelOrder(req, res) {
   try {
+    const order = await OrderRepository.getOrderById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ error: "Pedido no encontrado." });
+    }
+
     const { items, refunded, user_email, user_name } =
-      await OrderRepository.cancelOrder(req.params.id);
+      await OrderRepository.cancelOrder(req.params.id, true);
+
+    console.log(`Administrador cancelando pedido ${order.id}`, {
+      user_email,
+      user_name,
+      order,
+      items,
+      refunded,
+    });
 
     emailService
-      .sendOrderCancellationEmail(user_email, user_name, items, refunded)
+      .sendOrderCancellationEmail(
+        user_email,
+        user_name,
+        order.id,
+        items,
+        refunded,
+      )
       .catch((err) =>
         console.error("Error enviando email de cancelación:", err),
       );
@@ -123,7 +146,13 @@ async function userCancelOrder(req, res) {
       await OrderRepository.cancelOrder(req.params.id);
 
     emailService
-      .sendOrderCancellationEmail(user_email, user_name, items, refunded)
+      .sendOrderCancellationEmail(
+        user_email,
+        user_name,
+        order.id,
+        items,
+        refunded,
+      )
       .catch((err) =>
         console.error("Error enviando email de cancelación:", err),
       );
@@ -195,6 +224,7 @@ async function confirmStripeSession(req, res) {
           order.shipping_address,
           order.items,
           order.total,
+          order.id
         )
         .catch((err) =>
           console.error("Error enviando email de pedido:", err.message),
@@ -228,11 +258,17 @@ async function adminConfirmReturn(req, res) {
     }
 
     // Ejecutamos la lógica común del repositorio
-    const result = await OrderRepository.confirmReturn(id);
+    const { items, user_email, user_name } =
+      await OrderRepository.confirmReturn(id);
+
+    emailService
+      .sendReturnCompletedEmail(user_email, user_name, order.id, items)
+      .catch((err) =>
+        console.error("Error enviando email de devolución:", err.message),
+      );
 
     return res.status(200).json({
       message: "Devolución procesada: stock actualizado y reembolso emitido.",
-      data: result,
     });
   } catch (error) {
     res.status(error.message.includes("no encontrado") ? 404 : 400).json({
@@ -252,7 +288,7 @@ async function userRequestReturn(req, res) {
     }
 
     // 2. Verificar que el pedido le pertenece
-    if (String(order.id) !== String(req.params.id)) {
+    if (String(order.user_id) !== String(req.user.id)) {
       return res
         .status(403)
         .json({ error: "No tienes permiso para gestionar este pedido." });
@@ -266,7 +302,7 @@ async function userRequestReturn(req, res) {
     }
 
     // 4. Actualizar el estado a 'DEVOLUCION_PENDIENTE'
-    await OrderRepository.updateOrder({
+    const { user_email, user_name, items } = await OrderRepository.updateOrder({
       id: id,
       status: "DEVOLUCION_PENDIENTE",
     });
@@ -274,7 +310,7 @@ async function userRequestReturn(req, res) {
     // 5. Enviar email informativo al usuario
     // Creamos este método en el emailService para dar instrucciones de envío
     emailService
-      .sendReturnRequestEmail(order.user_email, order.user_name, id)
+      .sendRequestReturnEmail(user_email, user_name, order.id, items)
       .catch((err) => console.error("Error enviando email de solicitud:", err));
 
     res.status(200).json({
@@ -313,14 +349,58 @@ async function adminForceReturn(req, res) {
     }
 
     // Llamamos al MISMO método del repositorio
-    const result = await OrderRepository.confirmReturn(id);
+    const { items, user_email, user_name } =
+      await OrderRepository.confirmReturn(id, true);
+
+    // Enviamos email al usuario indicando que la devolución ha sido forzada
+    emailService
+      .sendReturnCompletedEmail(user_email, user_name, items)
+      .catch((err) =>
+        console.error(
+          "Error enviando email de confirmación de devolución:",
+          err,
+        ),
+      );
 
     return res.status(200).json({
       message: "El administrador ha forzado la devolución correctamente.",
-      data: result,
     });
   } catch (error) {
     console.error("Error en adminForceReturn:", error);
+    return res.status(500).json({ error: error.message });
+  }
+}
+
+async function adminRejectReturn(req, res) {
+  try {
+    const { id } = req.params;
+    const order = await OrderRepository.getOrderById(id);
+
+    if (!order) {
+      return res.status(404).json({ error: "Pedido no encontrado." });
+    }
+
+    // VALIDACIÓN: Solo se puede rechazar si está pendiente de devolución
+    if (order.status !== "DEVOLUCION_PENDIENTE") {
+      return res.status(400).json({
+        error: `No se puede rechazar la devolución en un pedido con estado ${order.status}.`,
+      });
+    }
+
+    // Cancelamos el proceso: revertimos el estado y NO devolvemos dinero
+    const { user_name, user_email, items } =
+      await OrderRepository.rejectReturn(id);
+
+    // Enviamos email al usuario indicando que la devolución ha sido rechazada
+    emailService
+      .sendReturnRejectedEmail(user_email, user_name, id, items)
+      .catch((err) => console.error("Error enviando email de rechazo:", err));
+
+    return res.status(200).json({
+      message: "Devolución rechazada. El pedido vuelve a estar 'ENTREGADO'.",
+    });
+  } catch (error) {
+    console.error("Error en adminRejectReturn:", error);
     return res.status(500).json({ error: error.message });
   }
 }
@@ -338,4 +418,5 @@ export default {
   userRequestReturn,
   adminConfirmReturn,
   adminForceReturn,
+  adminRejectReturn,
 };
